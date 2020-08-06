@@ -8,6 +8,8 @@ When run, aws-mfa-update will do the following:
 3. Execute the STS command via the AWS-CLI
 4. Populate the temporary credentials for future use with the CLI in `~/<user>/.aws/credentials`
 
+To build: `go build` in the project directory
+
 # Command Overivew
 ```
 aws-mfa-update <options>
@@ -70,8 +72,7 @@ In the above use case, the user would run: `./aws-mfa-update -otp=123456` and le
 ## Credentials File Assumptions
 * Assumes that the default section is to be protected
 * Assumes that the user-specified (target) profile for temporary credentials can have the following keys overwritten at will:
-  * aws_access_key_id
-  * aws_secret_access_key
-  * aws_session_token
-* Does NOT assume the profile section exists in the credentials file -- creates if needed.
- 
+  * `aws_access_key_id`
+  * `aws_secret_access_key`
+  * `aws_session_token`
+* Does **NOT** assume the profile section exists in the credentials file -- creates if needed.
