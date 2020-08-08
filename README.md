@@ -16,6 +16,7 @@ aws-mfa-update <options>
 
 -baseProfile=<profileName> - Name of the profile in the config file to find the mfa_serial entry to use
                             -> Assumes 'default' if not provided
+                            -> Will recurse on source_profile if mfa_serial is not found up to 6 times
                             
 -authProfile=<profileName> - Name of the profile to store the temporary authentication credentials to
                             -> If not provided a profile named 'mfa' is assumed as the target
@@ -32,7 +33,8 @@ aws-mfa-update <options>
 # Design goals and Assumptions
 The design and goal of aws-mfa-update is to provide a quick and safe method of populating temporary credentials from and for the AWS-CLI without implementing the full session management requirements of the AWS-SDK and make it so that the use of MFA with the AWS-CLI is a bit easier to manage and use for a typical end user and facilitate automation to re-up the temporary credentials (WIP).
 
-One use case may be a config file that looks as such:
+## Usecase 1
+Consider a config file that looks as such:
 ```
 [default]
 mfa_serial = arn:aws:iam::SOMEACCTNUM:mfa/userName
@@ -64,6 +66,50 @@ In the above use case, the user would run: `./aws-mfa-update -otp=123456` and le
 3. The parsed results are written to the credentials file, under the `mfa` profile (section)
 4. The user would then issue commands to the CLI as the `mfa` profile with the temporary credentials that were obtained
    * Example (assuming IAM access): `aws --profile mfa iam list-groups`
+
+## Usecase 2
+Consider a config file that looks as such:
+```
+[default]
+mfa_serial = arn:aws:iam::SOMEACCTNUM:mfa/userName
+region = us-east-1
+output = json
+
+[profile mfa]
+mfa_serial = arn:aws:iam::SOMEACCTNUM:mfa/userNameMFA
+region = us-east-1
+output = json
+
+[profile prod]
+region = us-east-1
+source_profile = mfa
+```
+
+And a credentials file that looks as such:
+```
+[default]
+aws_access_key_id = SOMEACCESSKEY
+aws_secret_access_key = SOMESECRETKEY
+
+[mfa]
+aws_access_key_id = ANOTHERACCESSKEY
+aws_secret_access_key = ANOTHERSECRETKEY
+
+[prod]
+aws_access_key_id = TEMPACCESSKEY
+aws_secret_access_key = TEMPSECRETKEY
+aws_session_token = TEMPTOKEN
+
+```
+In the above use case, the user would run: `./aws-mfa-update -baseProfile=prod -authProfile=prod -otp=987654`:
+1. The `aws-mfa-update` app will first look for the `mfa_serial` in the `prod` profile, it will not be found
+   * Instead, it will find the `source_profile` set to `mfa`, thus causing the command to look for the `mfa_serial` in the `mfa` profile, which it will find
+2. The `mfa_serial` from the `mfa` profile and the supplied OTP (987654) is passed to the AWS-CLI STS call
+   * Using the above file examples, the command passed to the CLI would be: `aws sts get-session-token --serial-number mfa_serial = arn:aws:iam::SOMEACCTNUM:mfa/userNameMFA --token-code 987654`
+3. The JSON result from the AWS-CLI is captured and parsed
+4. The parsed results are written to the credentials file, under the supplied `authProfile`, aka the `prod` profile (section)
+5. The user would then issue commands to the CLI as the `prod` profile with the temporary credentials that were obtained
+   * Example (assuming IAM access): `aws --profile prod iam list-groups`
 
 ## Config File Assumptions
 * Assumes that there is at least one valid `mfa_serial` entry for use with the STS call
