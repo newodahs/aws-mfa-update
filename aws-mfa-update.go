@@ -55,12 +55,15 @@ func main() {
    }
 
    //load in our config to get auth with... if no profile specified, use default
+   if strings.EqualFold(basePro, "default") != true {
+      basePro = fmt.Sprintf("profile %s", basePro)
+   }
    mfaSerial, err := loadProfileMFASerial(fmt.Sprintf("%s/.aws/config", userDir), basePro)
    if err != nil { log.Fatalln("Failed to get the MFA Serial\n", err) }
 
    //prompt for input...
    if isValidOTP(otp) != true {
-      log.Println("Supplied OTP doesn't look right... Prompting the user...\n")
+      log.Println("Supplied OTP doesn't look right... Prompting the user...")
       inOTP, err := getOTPCode()
       if err != nil { log.Fatalln("Failed to get a reasonable OTP from the user", err) }
       otp = inOTP
@@ -86,14 +89,33 @@ func main() {
       log.Fatalln("Unable to set the MFA credentials\n", err)
    }
 
-   log.Println(fmt.Sprintf("MFA Credentials set for profile [%s] using profile [%s].\n** Credentials expire at: %s\n", authPro, basePro, resp.Credentials.Expiration))
+   log.Println(fmt.Sprintf("MFA Credentials set for profile [%s] using profile [%s].\n** Credentials expire at: %s", authPro, basePro, resp.Credentials.Expiration))
 }
 
+const _maxLPListLen int = 6
 func loadProfileMFASerial(filename string, profile string) (string, error) {
 
    config, err := ini.Load(filename)
    if err != nil {
       return "", errors.New(fmt.Sprintf("Unable to open file: %s", filename))
+   }
+
+   var lProfile [_maxLPListLen]string
+   return findMFASerial(config, profile, lProfile[0:4], 0)
+}
+
+/*
+ * Broke this function out from loadProfileMFASerial and added functionality to try
+ * and find the mfa_serial via source_profile entries; in doing this, I chose to
+ * make this a recursive function and load the ini file once outside of the actual
+ * search logic - protects against circular references via a depth-limited array
+ * which also disallows more than 6 references
+*/
+func findMFASerial(config *ini.File, profile string, lastProList []string, curIt int) (string, error) {
+
+   //look for early exit to see if we've exceeded the maximum number of references
+   if (curIt >= _maxLPListLen) {
+      return "", errors.New(fmt.Sprintf("Exceeded profile referencing (max of six references allowed...). Last checked profile: %s", lastProList[4]))
    }
 
    //find the section
@@ -103,12 +125,50 @@ func loadProfileMFASerial(filename string, profile string) (string, error) {
    }
 
    //find the key-value
-   serial, err := iniProfile.GetKey("mfa_serial")
-   if err != nil {
-      return "", errors.New(fmt.Sprintf("Unable to get mfa_serial for profile: %s", profile))
+   //if the section has an mfa_serial key, use that, if not look for a
+   //source_profile key to point us to where to find the mfa_serial...
+   if iniProfile.HasKey("mfa_serial") == true {
+      //found the mfa_serial!
+      serial, err := iniProfile.GetKey("mfa_serial")
+      if err != nil {
+         panic(fmt.Sprintf("Unable to get mfa_serial for profile: %s", profile))
+      }
+      return serial.String(), nil
+   } else if iniProfile.HasKey("source_profile") == true {
+      //found a referenced profile to check for mfa_serial
+      sProfile, err := iniProfile.GetKey("source_profile")
+      if err != nil {
+         panic(fmt.Sprintf("Unable to get source_profile for profile: %s", profile))
+      }
+
+      //translate the key to a formatted string
+      sProStr := sProfile.String()
+      if strings.EqualFold(sProStr, "default") != true {
+         sProStr = fmt.Sprintf("profile %s", sProStr)
+      }
+
+      if len(sProStr) > 0 {
+         //check over the slice and look for circular references (have we seen it before)
+         for i := 0; i < _maxLPListLen; i++ {
+            if len(lastProList[i]) <= 0 {
+               break  //early out
+            }
+
+            if lastProList[i] == sProStr {
+               //circular reference detected...
+               return "", errors.New(fmt.Sprintf("Circluar reference of profiles detected (%s)", profile))
+            }
+         }
+
+         //add the current profile to the list and try the next one......
+         lastProList = append(lastProList, profile)
+         return findMFASerial(config, sProStr, lastProList, curIt + 1)
+      } else {
+         return "", errors.New(fmt.Sprintf("Blank source_profile specification found in: %s", profile))
+      }
    }
 
-   return serial.String(), nil
+   return "", errors.New(fmt.Sprintf("Unable to find either mfa_serial or source_profile for profile %s", profile))
 }
 
 func writeMFACreds(filename string, profile string, creds mfaCreds) (error) {
@@ -183,7 +243,7 @@ func getOTPCode() (string, error) {
       //cleanup the input
       otp = strings.Replace(input, "\n", "", -1)
       if isValidOTP(otp) != true {
-         log.Println("OTP doesn't look right (should be a six-digit code), try again...\n")
+         log.Println("OTP doesn't look right (should be a six-digit code), try again...")
          continue
       }
 
