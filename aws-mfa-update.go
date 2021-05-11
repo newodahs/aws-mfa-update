@@ -43,7 +43,7 @@ func main() {
 	flag.Parse()
 
 	//check for invalid authProfile
-	if strings.EqualFold(authPro, "default") == true {
+	if strings.EqualFold(authPro, "default") {
 		log.Fatalln("This application does not allow the overwriting of the default application credentials!\n\nUse a specific auth profile instead as best-practice.")
 	}
 
@@ -58,7 +58,7 @@ func main() {
 	}
 
 	//load in our config to get auth with... if no profile specified, use default
-	if strings.EqualFold(basePro, "default") != true {
+	if !strings.EqualFold(basePro, "default") {
 		basePro = fmt.Sprintf("profile %s", basePro)
 	}
 	mfaSerial, err := loadProfileMFASerial(fmt.Sprintf("%s/.aws/config", userDir), basePro)
@@ -67,7 +67,7 @@ func main() {
 	}
 
 	//prompt for input...
-	if isValidOTP(otp) != true {
+	if !isValidOTP(otp) {
 		log.Println("Supplied OTP doesn't look right... Prompting the user...")
 		inOTP, err := getOTPCode()
 		if err != nil {
@@ -107,7 +107,7 @@ func loadProfileMFASerial(filename string, profile string) (string, error) {
 
 	config, err := ini.Load(filename)
 	if err != nil {
-		return "", errors.New(fmt.Sprintf("Unable to open file: %s", filename))
+		return "", fmt.Errorf("unable to open file: %s", filename)
 	}
 
 	var lProfile [_maxLPListLen]string
@@ -125,26 +125,26 @@ func findMFASerial(config *ini.File, profile string, lastProList []string, curIt
 
 	//look for early exit to see if we've exceeded the maximum number of references
 	if curIt >= _maxLPListLen {
-		return "", errors.New(fmt.Sprintf("Exceeded profile referencing (max of six references allowed...). Last checked profile: %s", lastProList[4]))
+		return "", fmt.Errorf("exceeded profile referencing (max of six references allowed...). Last checked profile: %s", lastProList[4])
 	}
 
 	//find the section
 	iniProfile, err := config.GetSection(profile)
 	if err != nil {
-		return "", errors.New(fmt.Sprintf("Unable to find profile: %s", profile))
+		return "", fmt.Errorf("unable to find profile: %s", profile)
 	}
 
 	//find the key-value
 	//if the section has an mfa_serial key, use that, if not look for a
 	//source_profile key to point us to where to find the mfa_serial...
-	if iniProfile.HasKey("mfa_serial") == true {
+	if iniProfile.HasKey("mfa_serial") {
 		//found the mfa_serial!
 		serial, err := iniProfile.GetKey("mfa_serial")
 		if err != nil {
 			panic(fmt.Sprintf("Unable to get mfa_serial for profile: %s", profile))
 		}
 		return serial.String(), nil
-	} else if iniProfile.HasKey("source_profile") == true {
+	} else if iniProfile.HasKey("source_profile") {
 		//found a referenced profile to check for mfa_serial
 		sProfile, err := iniProfile.GetKey("source_profile")
 		if err != nil {
@@ -153,7 +153,7 @@ func findMFASerial(config *ini.File, profile string, lastProList []string, curIt
 
 		//translate the key to a formatted string
 		sProStr := sProfile.String()
-		if strings.EqualFold(sProStr, "default") != true {
+		if !strings.EqualFold(sProStr, "default") {
 			sProStr = fmt.Sprintf("profile %s", sProStr)
 		}
 
@@ -166,7 +166,7 @@ func findMFASerial(config *ini.File, profile string, lastProList []string, curIt
 
 				if lastProList[i] == sProStr {
 					//circular reference detected...
-					return "", errors.New(fmt.Sprintf("Circluar reference of profiles detected (%s)", profile))
+					return "", fmt.Errorf("circluar reference of profiles detected (%s)", profile)
 				}
 			}
 
@@ -174,18 +174,18 @@ func findMFASerial(config *ini.File, profile string, lastProList []string, curIt
 			lastProList = append(lastProList, profile)
 			return findMFASerial(config, sProStr, lastProList, curIt+1)
 		} else {
-			return "", errors.New(fmt.Sprintf("Blank source_profile specification found in: %s", profile))
+			return "", fmt.Errorf("blank source_profile specification found in: %s", profile)
 		}
 	}
 
-	return "", errors.New(fmt.Sprintf("Unable to find either mfa_serial or source_profile for profile %s", profile))
+	return "", fmt.Errorf("unable to find either mfa_serial or source_profile for profile %s", profile)
 }
 
 func writeMFACreds(filename string, profile string, creds mfaCreds) error {
 
 	config, err := ini.Load(filename)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Unable to open file: %s", filename))
+		return fmt.Errorf("unable to open file: %s", filename)
 	}
 
 	//see if the section exists
@@ -194,13 +194,13 @@ func writeMFACreds(filename string, profile string, creds mfaCreds) error {
 		//section doesn't exist, create it
 		newSection, err := config.NewSection(profile)
 		if err != nil {
-			return errors.New(fmt.Sprintf("Failed to setup section for profile: %s", profile))
+			return fmt.Errorf("failed to setup section for profile: %s", profile)
 		}
 		iniProfile = newSection
 	}
 
 	//set the key-value pairs
-	if iniProfile.HasKey("aws_access_key_id") == true {
+	if iniProfile.HasKey("aws_access_key_id") {
 		//set the existing key to the new value
 		aki, _ := iniProfile.GetKey("aws_access_key_id")
 		aki.SetValue(creds.AccessKeyId)
@@ -210,7 +210,7 @@ func writeMFACreds(filename string, profile string, creds mfaCreds) error {
 	}
 
 	//set the key-value pairs
-	if iniProfile.HasKey("aws_secret_access_key") == true {
+	if iniProfile.HasKey("aws_secret_access_key") {
 		//set the existing key to the new value
 		aki, _ := iniProfile.GetKey("aws_secret_access_key")
 		aki.SetValue(creds.SecretAccessKey)
@@ -220,7 +220,7 @@ func writeMFACreds(filename string, profile string, creds mfaCreds) error {
 	}
 
 	//set the key-value pairs
-	if iniProfile.HasKey("aws_session_token") == true {
+	if iniProfile.HasKey("aws_session_token") {
 		//set the existing key to the new value
 		aki, _ := iniProfile.GetKey("aws_session_token")
 		aki.SetValue(creds.SessionToken)
@@ -231,7 +231,7 @@ func writeMFACreds(filename string, profile string, creds mfaCreds) error {
 
 	err = config.SaveTo(filename)
 	if err != nil {
-		return errors.New("Failed to save new MFA values to credentials file.")
+		return errors.New("failed to save new MFA values to credentials file")
 	}
 
 	return nil
@@ -250,12 +250,12 @@ func getOTPCode() (string, error) {
 		fmt.Print("Enter OTP: ")
 		input, err := reader.ReadString('\n')
 		if err != nil {
-			return "", errors.New("Failed to read the users input OTP")
+			return "", errors.New("failed to read the users input OTP")
 		}
 
 		//cleanup the input
 		otp = strings.Replace(input, "\n", "", -1)
-		if isValidOTP(otp) != true {
+		if !isValidOTP(otp) {
 			log.Println("OTP doesn't look right (should be a six-digit code), try again...")
 			continue
 		}
@@ -263,7 +263,7 @@ func getOTPCode() (string, error) {
 		break //assume any input >= 6 is good; no idea what the future of OTP looks like...
 	}
 	if i >= _maxRetries {
-		return "", errors.New("User retried OTP too many times")
+		return "", errors.New("user retried OTP too many times")
 	}
 
 	return otp, nil
